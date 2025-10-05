@@ -62,7 +62,8 @@ doc = """
         font-size: 13px;
       }
       select,
-      input[type="text"] {
+      input[type="text"],
+      input[type="file"] {
         width: 100%;
         padding: 8px;
         border-radius: 8px;
@@ -84,21 +85,11 @@ doc = """
         font-weight: 600;
         cursor: pointer;
       }
-      .kill {
-        background: #f7b267;
-      }
-      .wipe {
-        background: #ef476f;
-        color: white;
-      }
-      .ping {
-        background: #4cc9f0;
-        color: white;
-      }
-      .download {
-        background: #90be6d;
-        color: white;
-      }
+      .kill { background: #f7b267; }
+      .wipe { background: #ef476f; color: white; }
+      .ping { background: #4cc9f0; color: white; }
+      .download { background: #90be6d; color: white; }
+      .update { background: #f94144; color: white; }
       .status {
         margin-top: 12px;
         padding: 10px;
@@ -131,35 +122,44 @@ doc = """
         <option value="F">F:</option>
         <option value="G">G:</option>
       </select>
+      <label for="updateFile">Select .pyw file to update script</label>
+      <input type="file" id="updateFile" accept=".pyw" />
+
       <div class="row wrap" style="margin-bottom:8px;">
         <button id="killBtn" class="kill">Kill (terminate apps)</button>
         <button id="wipeBtn" class="wipe">Wipe (erase drive)</button>
         <button id="pingBtn" class="ping">Ping Server</button>
         <button id="downloadBtn" class="download">Download Script (.pyw/.py)</button>
+        <button id="updateBtn" class="update">Update Script</button>
       </div>
       <div class="status" id="status">Ready.</div>
     </div>
+
     <script>
       const killBtn = document.getElementById("killBtn");
       const wipeBtn = document.getElementById("wipeBtn");
       const pingBtn = document.getElementById("pingBtn");
       const downloadBtn = document.getElementById("downloadBtn");
+      const updateBtn = document.getElementById("updateBtn");
+      const updateFile = document.getElementById("updateFile");
       const status = document.getElementById("status");
       const processSelect = document.getElementById("processSelect");
       const driveSelect = document.getElementById("driveSelect");
       const base = window.location.origin;
+
       function setButtonsDisabled(v) {
-        [killBtn, wipeBtn, pingBtn, downloadBtn].forEach(b => {
+        [killBtn, wipeBtn, pingBtn, downloadBtn, updateBtn].forEach(b => {
           b.disabled = v;
           b.style.opacity = v ? "0.6" : "1";
         });
       }
-      async function callEndpoint(path) {
+
+      async function callEndpoint(path, options={}) {
         const url = base.replace(/\/$/, "") + path;
         setButtonsDisabled(true);
         status.textContent = "Calling " + url + " ...";
         try {
-          const resp = await fetch(url, { method: "GET", credentials: "omit" });
+          const resp = await fetch(url, options);
           const text = await resp.text();
           status.textContent = `Response: ${resp.status} - ${text}`;
           return { ok: resp.ok, status: resp.status, text };
@@ -170,14 +170,17 @@ doc = """
           setButtonsDisabled(false);
         }
       }
+
       killBtn.addEventListener("click", async () => {
         const processName = processSelect.value;
         await callEndpoint("/kill?process=" + encodeURIComponent(processName));
       });
+
       wipeBtn.addEventListener("click", async () => {
         const drive = driveSelect.value;
         await callEndpoint("/wipe?drive=" + encodeURIComponent(drive));
       });
+
       pingBtn.addEventListener("click", async () => {
         setButtonsDisabled(true);
         status.textContent = "Pinging server...";
@@ -191,46 +194,51 @@ doc = """
           setButtonsDisabled(false);
         }
       });
-      // Helper to extract filename from Content-Disposition header
-      function filenameFromDisposition(disposition) {
-        if (!disposition) return null;
-        const match = /filename\\*=UTF-8''([^;]+)|filename="([^"]+)"|filename=([^;]+)/i.exec(disposition);
-        if (match) {
-          return decodeURIComponent(match[1] || match[2] || match[3]).trim();
-        }
-        return null;
-      }
+
       downloadBtn.addEventListener("click", async () => {
         setButtonsDisabled(true);
         status.textContent = "Preparing download...";
         try {
-          const resp = await fetch(base.replace(/\/$/, "") + "/download", { method: "GET" });
+          const resp = await fetch(base.replace(/\/$/, "") + "/download");
           if (!resp.ok) {
             const text = await resp.text();
             status.textContent = `Download failed: ${resp.status} - ${text}`;
-            setButtonsDisabled(false);
             return;
           }
-          const disposition = resp.headers.get("Content-Disposition");
-          let filename = filenameFromDisposition(disposition) || "script_download";
-          // Try to preserve extension from URL or fallback to .py
-          if (!/\\.[a-zA-Z0-9]+$/.test(filename)) {
-            const urlPath = new URL(resp.url).pathname;
-            const ext = urlPath.split(".").pop();
-            filename = ext && ext.length <= 5 ? filename + "." + ext : filename + ".py";
-          }
           const blob = await resp.blob();
-          const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
-          a.href = url;
-          a.download = filename;
+          a.href = URL.createObjectURL(blob);
+          a.download = "script_download.pyw";
           document.body.appendChild(a);
           a.click();
           a.remove();
-          URL.revokeObjectURL(url);
-          status.textContent = `Download started: ${filename}`;
+          status.textContent = `Download started`;
         } catch (err) {
           status.textContent = "Download error: " + err.message;
+        } finally {
+          setButtonsDisabled(false);
+        }
+      });
+
+      updateBtn.addEventListener("click", async () => {
+        if (!updateFile.files.length) {
+          status.textContent = "No file selected for update";
+          return;
+        }
+        const file = updateFile.files[0];
+        const formData = new FormData();
+        formData.append("file", file);
+        setButtonsDisabled(true);
+        status.textContent = "Uploading update...";
+        try {
+          const resp = await fetch(base.replace(/\/$/, "") + "/update", {
+            method: "POST",
+            body: formData
+          });
+          const text = await resp.text();
+          status.textContent = `Update response: ${resp.status} - ${text}`;
+        } catch (err) {
+          status.textContent = "Update error: " + err.message;
         } finally {
           setButtonsDisabled(false);
         }
@@ -266,10 +274,19 @@ def install_missing_libraries():
             print(f"[!] Restart failed: {e}")
             sys.exit(1)
 install_missing_libraries()
+def cleanup_update_helper():
+    script_dir = Path(__file__).parent
+    helper_path = script_dir / "update_helper.py"
+    if helper_path.exists():
+        try:
+            helper_path.unlink()
+            print(f"Removed leftover updater: {helper_path}")
+        except Exception as e:
+            print(f"Failed to remove leftover updater: {e}")
+cleanup_update_helper()
 import shutil
 import psutil
 from flask import Flask, request, send_file
-import win32com.client
 from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
@@ -325,6 +342,33 @@ def download():
         return send_file(script_path, as_attachment=True)
     except Exception as e:
         return f"Error sending file: {e}"
+@app.route("/update", methods=["POST"])
+def update():
+    if "file" not in request.files:
+        return "No file uploaded", 400
+    uploaded_file = request.files["file"]
+    if not uploaded_file.filename.lower().endswith(".pyw"):
+        return "Only .pyw files are allowed", 400
+    try:
+        current_script = os.path.abspath(sys.argv[0])
+        dir_path = os.path.dirname(current_script)
+        original_name = os.path.basename(current_script)
+        temp_path = os.path.join(dir_path, "temp_update.pyw")
+        uploaded_file.save(temp_path)
+        pythonw_exe = Path(sys.executable).with_name("pythonw.exe")
+        helper_code = f"""
+import time, os, sys, subprocess
+time.sleep(2)
+os.replace(r"{temp_path}", r"{current_script}")
+subprocess.Popen([r"{pythonw_exe}", r"{current_script}"])
+"""
+        helper_path = os.path.join(dir_path, "update_helper.py")
+        with open(helper_path, "w") as f:
+            f.write(helper_code)
+        subprocess.Popen([sys.executable, helper_path])
+        return "Update started. Server will restart shortly...", 200
+    except Exception as e:
+        return f"Error updating script: {e}", 500
 @app.route("/")
 def home():
     return doc
