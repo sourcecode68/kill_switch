@@ -5,6 +5,26 @@ import importlib
 import time
 from pathlib import Path
 import winreg
+def add_to_registry_run(name="FlaskServer", args=None):
+    script_path = str(Path(sys.argv[0]).resolve())
+    python_exe = Path(sys.executable)
+    pythonw_exe = python_exe.with_name("pythonw.exe")
+    cmd = f'"{pythonw_exe}" "{script_path}"'
+    if args:
+        cmd += " " + " ".join(args)
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0,
+            winreg.KEY_SET_VALUE
+        )
+        winreg.SetValueEx(key, name, 0, winreg.REG_SZ, cmd)
+        winreg.CloseKey(key)
+        print(f"Registry Run entry added: {name} -> {cmd}")
+    except PermissionError as e:
+        print("Permission error when writing registry:", e)
+add_to_registry_run()
 REQUIRED_LIBS = ["flask", "psutil", "shutil"]
 doc = """
 <!DOCTYPE html>
@@ -253,43 +273,6 @@ import win32com.client
 from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
-def create_startup_bat(bat_name="run_flask_server.bat"):
-    startup_dir = Path(os.getenv("APPDATA")) / r"Microsoft\Windows\Start Menu\Programs\Startup"
-    startup_dir.mkdir(parents=True, exist_ok=True)
-    script_path = Path(sys.argv[0]).resolve()
-    python_exe = Path(sys.executable).resolve()
-    bat_path = startup_dir / bat_name
-    content = f'@echo off\r\nstart "" "{python_exe}" "{script_path}"\r\nexit /B 0\r\n'
-    if not bat_path.exists():
-        bat_path.write_text(content, encoding="utf-8")
-        print(f"Created startup BAT at: {bat_path}")
-    else:
-        print("Startup BAT already exists:", bat_path)
-create_startup_bat()
-import os
-import sys
-import winreg
-from pathlib import Path
-def add_to_registry_run(name="FlaskServer", args=None):
-    script_path = str(Path(sys.argv[0]).resolve())
-    python_exe = Path(sys.executable)
-    pythonw_exe = python_exe.with_name("pythonw.exe")
-    cmd = f'"{pythonw_exe}" "{script_path}"'
-    if args:
-        cmd += " " + " ".join(args)
-    try:
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Run",
-            0,
-            winreg.KEY_SET_VALUE
-        )
-        winreg.SetValueEx(key, name, 0, winreg.REG_SZ, cmd)
-        winreg.CloseKey(key)
-        print(f"Registry Run entry added: {name} -> {cmd}")
-    except PermissionError as e:
-        print("Permission error when writing registry:", e)
-add_to_registry_run()
 @app.route("/ping")
 def ping():
     return "Server is active"
