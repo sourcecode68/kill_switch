@@ -25,7 +25,6 @@ def add_to_registry_run(name="FlaskServer", args=None):
     except PermissionError as e:
         print("Permission error when writing registry:", e)
 add_to_registry_run()
-REQUIRED_LIBS = ["flask", "psutil", "shutil"]
 doc = """
 <!DOCTYPE html>
 <html lang="en">
@@ -107,14 +106,16 @@ doc = """
   <body>
     <div class="card">
       <label for="processSelect">Select Process to Kill</label>
-      <select id="processSelect">
+      <select id="processSelect" onchange="toggleCustomInput()">
         <option value="POWERPNT.EXE">PowerPoint</option>
         <option value="WINWORD.EXE">Word</option>
         <option value="EXCEL.EXE">Excel</option>
         <option value="MSEDGE.EXE">Microsoft Edge</option>
         <option value="CHROME.EXE">Google Chrome</option>
-        <option value="CODE.EXE">VS CODE</option>
+        <option value="CODE.EXE">VS Code</option>
+        <option value="custom">Custom...</option>
       </select>
+      <input type="text" id="customProcess" placeholder="Enter custom process name" style="display:none; margin-top:5px;">
       <label for="driveSelect">Select Drive to Wipe</label>
       <select id="driveSelect">
         <option value="D">D:</option>
@@ -172,9 +173,14 @@ doc = """
       }
 
       killBtn.addEventListener("click", async () => {
-        const processName = processSelect.value;
+        const processName = getSelectedProcess(); // ✅ now supports custom entry
+        if (!processName) {
+          status.textContent = "Please enter or select a process name.";
+          return;
+        }
         await callEndpoint("/kill?process=" + encodeURIComponent(processName));
       });
+
 
       wipeBtn.addEventListener("click", async () => {
         const drive = driveSelect.value;
@@ -243,37 +249,27 @@ doc = """
           setButtonsDisabled(false);
         }
       });
+      function getSelectedProcess() {
+        const select = document.getElementById('processSelect');
+        const customInput= document.getElementById('customProcess');
+        return select.value === 'custom' ? customInput.value.trim() : select.value;
+      }
+      function toggleCustomInput() {
+        const select = document.getElementById('processSelect');
+        const customInput = document.getElementById('customProcess');
+
+        if (select.value === 'custom') {
+          customInput.style.display = 'inline-block';
+          customInput.focus();
+        } else {
+          customInput.style.display = 'none';
+          customInput.value = '';
+        }
+      }
     </script>
   </body>
 </html>
 """
-def install_missing_libraries():
-    re_run = False
-    for lib in REQUIRED_LIBS:
-        try:
-            importlib.import_module(lib)
-        except ImportError:
-            print(f"[+] Installing missing library: {lib}")
-            subprocess.check_call([sys.executable, "-m", "pip", "install", lib])
-            re_run = True
-    try:
-        import pythoncom, pywintypes 
-    except ImportError:
-        print("[*] Running pywin32 post-install script...")
-        subprocess.run([sys.executable, os.path.join(sys.exec_prefix, "Scripts", "pywin32_postinstall.py"), "-install"])
-        re_run = True
-    if re_run:
-        print("[*] Restarting script to apply new modules...")
-        time.sleep(2)
-        try:
-            # safer restart using quoted path
-            cmd = [sys.executable] + sys.argv
-            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
-            sys.exit(0)
-        except Exception as e:
-            print(f"[!] Restart failed: {e}")
-            sys.exit(1)
-install_missing_libraries()
 def cleanup_update_helper():
     script_dir = Path(__file__).parent
     helper_path = script_dir / "update_helper.py"
@@ -311,17 +307,7 @@ def wipe():
     return f"Successful wipe of {drive}: drive"
 @app.route("/kill")
 def kill():
-    SAFE_TO_KILL = {
-        "POWERPNT.EXE",
-        "WINWORD.EXE",
-        "EXCEL.EXE",
-        "MSEDGE.EXE",
-        "CHROME.EXE",
-        "CODE.EXE"
-    }
     process_to_kill = request.args.get("process", "").upper()
-    if process_to_kill not in SAFE_TO_KILL:
-        return "Invalid or unsafe process"
     flag = False
     for p in psutil.process_iter(['pid', 'name']):
         if p.info['name'] and p.info['name'].upper() == process_to_kill:
