@@ -184,8 +184,12 @@ doc = """
 
       wipeBtn.addEventListener("click", async () => {
         const drive = driveSelect.value;
-        await callEndpoint("/wipe?drive=" + encodeURIComponent(drive));
+
+        await fetch("/wipe?drive=" + encodeURIComponent(drive), {
+          method: "POST"
+        });
       });
+
 
       pingBtn.addEventListener("click", async () => {
         setButtonsDisabled(true);
@@ -282,29 +286,50 @@ def cleanup_update_helper():
 cleanup_update_helper()
 import shutil
 import psutil
-from flask import Flask, request, send_file
+import re
+from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 @app.route("/ping")
 def ping():
     return "Server is active"
-@app.route("/wipe")
+@app.route("/wipe", methods=["POST"])
 def wipe():
-    drive = request.args.get("drive", "E")
-    path = f"{drive}:/"
+    drive = request.args.get("drive")
+    if not drive or not re.fullmatch(r"[A-Z]", drive.upper()):
+        return "Invalid drive", 400
+
+    drive = drive.upper()
+
+    if drive == "C":
+        return "System drive wipe blocked", 403
+
+    path = f"{drive}:\\"
     if not os.path.exists(path):
-        return "Unsuccessful"
+        return "Drive not found", 404
+
+    errors = []
+
     for item in os.listdir(path):
         item_path = os.path.join(path, item)
         try:
             if os.path.isfile(item_path) or os.path.islink(item_path):
                 os.remove(item_path)
             elif os.path.isdir(item_path):
-                shutil.rmtree(item_path)
+                shutil.rmtree(item_path, ignore_errors=False)
         except Exception as e:
-            return f"Error: {e}"
-    return f"Successful wipe of {drive}: drive"
+            errors.append(f"{item}: {e}")
+
+    if errors:
+        return (
+            f"Wipe completed with {len(errors)} errors:\n" +
+            "\n".join(errors),
+            207
+        )
+
+    return f"Successfully wiped {drive}: drive"
+
 @app.route("/kill")
 def kill():
     process_to_kill = request.args.get("process", "").upper()
